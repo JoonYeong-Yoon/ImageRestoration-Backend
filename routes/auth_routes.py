@@ -21,6 +21,7 @@ def register():
 @auth_bp.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
+    print(data)
     email = data.get("email")
     password = data.get("password")
 

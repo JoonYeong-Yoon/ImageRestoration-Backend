@@ -460,3 +460,6 @@ if __name__ == "__main__":
     ]
     img_path = "/content/drive/MyDrive/Advanced_Project/TEST6.JPEG"
     visualize_multiple_ckpts(ckpt_paths, img_path, device='cuda' if torch.cuda.is_available() else 'cpu')
+    
+    
+    #colab 버전이라서 내가 사용하는 버전으로 전체 바꾸기 

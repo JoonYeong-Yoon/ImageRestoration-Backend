@@ -1,0 +1,6 @@
+torch>=2.0
+torchvision
+pytorch-lightning
+opencv-python
+pillow
+numpy

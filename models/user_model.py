@@ -21,7 +21,7 @@ def validate_user(email, password):
     """사용자 로그인 검증"""
     sql = "SELECT * FROM users WHERE email = %s"
     user = execute_query(sql, (email,), fetchone=True)
-
+    print(user)
     if not user:
         return None
     if not check_password_hash(user["password"], password):
