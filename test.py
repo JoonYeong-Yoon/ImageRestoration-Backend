@@ -1,4 +1,4 @@
-from backend.backend.ImageRestoration_Backend import colorizer
+from backend.backend.ImageRestoration_Backend.models import colorizer
 
 model_path = r"D:\2pj\2pj\humanImageRestorationProject\backend\backend\ImageRestoration_Backend\colorizer.ckpt"
 model = colorizer.load_colorizer(model_path)
