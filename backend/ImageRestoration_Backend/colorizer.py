@@ -82,33 +82,37 @@ def load_colorizer(model_path):
     return model
 
 # ===============================
-# 3️⃣ 이미지 컬러화 함수
+# 3️⃣ 이미지 컬러화 함수 (학습 정규화 반영)
 # ===============================
 def colorize_image(model, input_path, output_dir):
     # L 채널 흑백 이미지
     image = Image.open(input_path).convert("L")
     transform = transforms.Compose([
-        transforms.Resize((256, 256)),
+        transforms.Resize((320, 320)),           # 학습 시 target_size
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5], std=[0.5])  # 학습 시 정규화와 동일하게
+        transforms.Normalize(mean=[0.0], std=[1.0])  # 이미 L은 [-1,1]로 후처리 예정
     ])
     l_tensor = transform(image).unsqueeze(0)
+    
+    # 학습 시 정규화: L [-1,1] 범위, 모델 입력 그대로
+    l_tensor = (np.array(image.resize((320,320)), dtype=np.float32) / 50.0) - 1.0
+    l_tensor = torch.from_numpy(l_tensor).unsqueeze(0).unsqueeze(0)  # (1,1,H,W)
 
     with torch.no_grad():
         ab_output = model(l_tensor)  # UNet 출력 ab 채널 [-1,1]
         ab_output = ab_output[0].permute(1, 2, 0).cpu().numpy()
-        ab_output = ab_output * 128  # [-1,1] → [-128,128] 범위
+        ab_output = np.clip(ab_output, -1, 1)  # 안정화
+        ab_output = ab_output * 128            # [-128,128] 범위
 
-    # L 채널 스케일링: Lab에서 L은 0~100
-    l_channel = np.array(image.resize((256, 256)), dtype=np.float32)
-    l_channel = (l_channel / 255.0) * 100  # 0~100 범위로 변환
+    # L 채널 복원: 학습 시 정규화와 반대로 처리
+    l_channel = ((l_tensor[0,0].cpu().numpy() + 1.0) * 50.0)  # 0~100
 
     # Lab 이미지 합치기
-    lab_image = np.zeros((256, 256, 3), dtype=np.float32)
+    lab_image = np.zeros((320, 320, 3), dtype=np.float32)
     lab_image[..., 0] = l_channel
     lab_image[..., 1:] = ab_output
 
-    # Lab → RGB 변환
+    # Lab -> RGB
     rgb_image = color.lab2rgb(lab_image)
     rgb_image = (rgb_image * 255).clip(0, 255).astype(np.uint8)
     output_image = Image.fromarray(rgb_image)
