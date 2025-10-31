@@ -8,7 +8,7 @@ image_bp = Blueprint("image_bp", __name__)
 def colorize():
     """흑백 이미지 → AI 컬러화"""
     file = request.files.get("file")
-
+    request.cookies["user_session"]
     if not file:
         return jsonify({"error": "이미지 파일이 필요합니다."}), 400
 
