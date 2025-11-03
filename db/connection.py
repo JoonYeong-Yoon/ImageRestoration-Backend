@@ -1,47 +1,19 @@
-import pymysql
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 from config.settings import DB_CONFIG
 
-def get_connection():
-    """MySQL DB 커넥션 생성"""
-    return pymysql.connect(
-        **DB_CONFIG,
-        cursorclass=pymysql.cursors.DictCursor,
-        autocommit=True
-    )
+DATABASE_URI = (
+    f"mysql+pymysql://{DB_CONFIG['user']}:{DB_CONFIG['password']}"
+    f"@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+)
 
+engine = create_engine(DATABASE_URI, pool_pre_ping=True, future=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
-def test_connection():
-    """DB 연결 테스트용 함수"""
+def get_db():
+    db = SessionLocal()
     try:
-        conn = get_connection()
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT 1 AS result")
-            result = cursor.fetchone()
-            print("✅ DB 연결 성공:", result)
-        conn.close()
-    except Exception as e:
-        print("❌ DB 연결 실패:", e)
-
-
-def execute_query(sql, params=None, fetchone=False, fetchall=False):
-    """
-    공통 SQL 실행 함수
-    - INSERT / UPDATE / DELETE / SELECT 등 다 가능
-    """
-    conn = None
-    try:
-        conn = get_connection()
-        with conn.cursor() as cursor:
-            cursor.execute(sql, params)
-            if fetchone:
-                return cursor.fetchone()
-            elif fetchall:
-                return cursor.fetchall()
-            else:
-                return True
-    except Exception as e:
-        print("❌ SQL 실행 에러:", e)
-        return None
+        yield db
     finally:
-        if conn:
-            conn.close()
+        db.close()

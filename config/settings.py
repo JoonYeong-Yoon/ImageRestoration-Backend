@@ -1,15 +1,16 @@
+import os
 DB_CONFIG = {
-    # "host": "192.168.0.9",
-    "host": "192.168.0.6",
-    "port": 3307, 
     "user": "root",
-    # "password": "1234",
     "password": "test",
+    "host": "192.168.0.9",
+    "port": 3307,
     "database": "ImageRestoration",
     "charset": "utf8mb4"
 }
 
-SECRET_KEY = "super_secret_key"
-
-
-# ---- DB 연결 정보 (환경에 맞게 수정) ----
+SECRET_KEY = "supersecretkey"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.path.join(BASE_DIR, "exports/uploads")
+RESULT_DIR = os.path.join(BASE_DIR, "exports/processed")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(RESULT_DIR, exist_ok=True)

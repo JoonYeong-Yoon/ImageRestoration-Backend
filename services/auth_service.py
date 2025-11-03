@@ -1,26 +1,66 @@
-from db.connection import get_connection
+from sqlalchemy.orm import Session
+from models.user_model import User
+from db_models.session_model import SessionToken
 import bcrypt
+import uuid
+from datetime import datetime, timedelta
 
-def register_user(email, password):
-    hashed_pw = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+def register_user(db: Session, email: str, password: str):
+    from utils.exceptions import EmailAlreadyExistsException
+    
+    existing = db.query(User).filter(User.email == email).first()
+    if existing:
+        raise EmailAlreadyExistsException()
+        
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode()
+    user = User(email=email, password=hashed)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"user_id": user.uid}
 
-    with get_connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id FROM users WHERE email=%s", (email,))
-        if cur.fetchone():
-            return {"ok": False, "msg": "이미 존재하는 이메일입니다."}
+def login_user(db: Session, email: str, password: str):
+    from utils.exceptions import UserNotFoundException, InvalidCredentialsException
+    
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise UserNotFoundException()
+        
+    # 저장된 비밀번호가 해시화되어 있는지 확인
+    stored_password = user.password
+    if stored_password.startswith(('$2a$', '$2b$', '$2y$')):  # bcrypt 해시 형식 확인
+        if not bcrypt.checkpw(password.encode(), stored_password.encode()):
+            raise InvalidCredentialsException()
+    else:
+        # 평문 비밀번호와 비교 (테스트용 계정)
+        if password != stored_password:
+            raise InvalidCredentialsException()
+    
+    # 세션 토큰 생성 및 DB 저장 (UUID4)
+    session_token = uuid.uuid4().hex
+    expires_at = datetime.utcnow() + timedelta(hours=1)
 
-        cur.execute("INSERT INTO users (email, password) VALUES (%s, %s)", (email, hashed_pw))
-        return {"ok": True, "msg": "회원가입 성공"}
+    session_entry = SessionToken(
+        session_id=session_token,
+        uid=user.uid,
+        created_at=datetime.utcnow(),
+        expires_at=expires_at
+    )
+    db.add(session_entry)
+    db.commit()
 
-def login_user(email, password):
-    with get_connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT * FROM users WHERE email=%s", (email,))
-        user = cur.fetchone()
+    return {
+        "access_token": session_token,
+        "token_type": "session",
+        "expires_in": 3600,
+        "user_id": user.uid
+    }
 
-        if not user:
-            return {"ok": False, "msg": "존재하지 않는 이메일입니다."}
-
-        if not bcrypt.checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
-            return {"ok": False, "msg": "비밀번호가 일치하지 않습니다."}
-
-        return {"ok": True, "msg": "로그인 성공", "user": {"id": user["id"], "email": user["email"]}}
+def logout_user(db: Session, session_token: str):
+    """Delete session token from DB to log out user."""
+    sess = db.query(SessionToken).filter(SessionToken.session_id == session_token).first()
+    if sess:
+        db.delete(sess)
+        db.commit()
+        return True
+    return False

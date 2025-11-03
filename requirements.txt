@@ -1,4 +1,11 @@
-opencv-python
-numpy
-requests
-tqdm
+fastapi
+numpy==1.23
+sqlalchemy
+pymysql
+bcrypt
+email_validator
+torch==2.0.0
+torchvision==0.15.1
+python-multipart
+scikit-image
+uvicorn
