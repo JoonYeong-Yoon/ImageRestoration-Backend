@@ -44,6 +44,10 @@ except Exception as e:
     print(f"[ERROR] ❌ Failed to initialize models: {e}")
     UNET_MODEL, ECCV16_MODEL = None, None
 
+MODEL_DISPATCH = {
+    "unet": lambda img: UNET_MODEL.colorize_with_unet(img) if UNET_MODEL else (_ for _ in ()).throw(ModelNotLoadedException("UNet 모델이 로드되지 않았습니다.")),
+    "eccv16": lambda img: ECCV16_MODEL.colorize_with_eccv16(img) if ECCV16_MODEL else (_ for _ in ()).throw(ModelNotLoadedException("ECCV16 모델이 로드되지 않았습니다.")),
+}
 
 # ============================================================
 # 🎨 /colorize : 흑백 → 컬러 복원
@@ -51,13 +55,11 @@ except Exception as e:
 @router.post("/colorize")
 async def colorize(
     file: UploadFile = File(...),
-    model: str = Query("unet", enum=["unet", "eccv16"], description="사용할 모델 선택"),
-    # current_user: dict = Depends(get_current_user)
+    model: str = Query("eccv16", enum=["unet", "eccv16"], description="사용할 모델 선택"),
 ):
     """흑백 이미지를 컬러로 변환 (UNet / ECCV16 선택 가능)"""
     validate_image(file)
     mode = ProcessingMode.COLORIZE
-    # user_id = current_user["user_id"]
     user_id = "temp"
 
     safe_filename = f"{user_id}_{file.filename}"
@@ -74,19 +76,21 @@ async def colorize(
         # 2️⃣ PIL 로드
         pil_data = Image.open(input_path).convert("RGB")
 
-        # 3️⃣ 캐싱된 모델 사용
-        if model.lower() == "unet":
-            if UNET_MODEL is None:
-                raise ModelNotLoadedException("UNet 모델이 로드되지 않았습니다.")
-            out_img = UNET_MODEL.colorize_with_unet(pil_data)
-
-        elif model.lower() == "eccv16":
-            if ECCV16_MODEL is None:
-                raise ModelNotLoadedException("ECCV16 모델이 로드되지 않았습니다.")
-            out_img = ECCV16_MODEL.colorize_with_eccv16(pil_data)
-
-        else:
+        # 3️⃣ 선택한 모델 호출
+        if model.lower() not in MODEL_DISPATCH:
             raise HTTPException(status_code=400, detail=f"지원하지 않는 모델: {model}")
+
+        print(f"[DEBUG] 모델 호출 시작: {model.lower()}, 입력 이미지 size: {pil_data.size}, mode: {pil_data.mode}")
+
+        # =========================
+        # 모델별 독립 _process_image 호출
+        # =========================
+        if model.lower() == "unet":
+            out_img = UNET_MODEL._process_image(pil_data)  # UNet 전용 처리
+        elif model.lower() == "eccv16":
+            out_img = ECCV16_MODEL._process_image(pil_data)  # ECCV16 전용 처리
+
+        print(f"[DEBUG] 모델 호출 완료: {model.lower()}, 출력 타입: {type(out_img)}, size: {out_img.size}")
 
         # 4️⃣ 결과 저장
         out_img.save(output_path)
@@ -100,9 +104,12 @@ async def colorize(
     except ValueError:
         raise ModelNotLoadedException()
     except Exception as e:
+        import traceback
+        print(f"[ERROR] {model} 처리 중 예외 발생: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Cleanup uploaded 파일
+        # Cleanup 업로드 파일
         if os.path.exists(input_path):
             os.remove(input_path)
             
