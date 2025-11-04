@@ -52,12 +52,13 @@ except Exception as e:
 async def colorize(
     file: UploadFile = File(...),
     model: str = Query("unet", enum=["unet", "eccv16"], description="사용할 모델 선택"),
-    current_user: dict = Depends(get_current_user)
+    # current_user: dict = Depends(get_current_user)
 ):
     """흑백 이미지를 컬러로 변환 (UNet / ECCV16 선택 가능)"""
     validate_image(file)
     mode = ProcessingMode.COLORIZE
-    user_id = current_user["user_id"]
+    # user_id = current_user["user_id"]
+    user_id = "temp"
 
     safe_filename = f"{user_id}_{file.filename}"
     input_path = os.path.join(UPLOAD_DIR, safe_filename)
@@ -109,13 +110,14 @@ async def colorize(
 @router.post("/restore")
 async def restore(
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
+    # current_user: dict = Depends(get_current_user)
 ):
     """훼손된 이미지 복원"""
     """흑백 이미지를 컬러로 변환"""
     validate_image(file)
     mode = ProcessingMode.COLORIZE
-    user_id = current_user["user_id"]
+    # user_id = current_user["user_id"]
+    user_id = "temp"
     safe_filename = f"{user_id}_{file.filename}"
     input_path = os.path.join(UPLOAD_DIR, safe_filename)
     output_filename = f"{mode}d_{safe_filename}"
