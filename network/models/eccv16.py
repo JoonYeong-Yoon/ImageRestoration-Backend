@@ -27,6 +27,9 @@ class BaseColor(nn.Module):
         # normalize L channel to [-1, 1]
         return (x - 50.0) / 100.0
 
+    def unnormalize_l(self, x):
+        return x * 100 + 50
+    
     def normalize_ab(self, x):
         # normalize ab channels to [-1, 1]
         return x / 110.0

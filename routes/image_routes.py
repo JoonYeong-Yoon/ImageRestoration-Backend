@@ -1,20 +1,23 @@
 import os, torch
 from enum import Enum
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from PIL import Image
 from torchvision import transforms
 import torch.nn.functional as F
 
 from utils.exceptions import InvalidFileException, ModelNotLoadedException
-
 from utils.auth import get_current_user
 from utils.image import validate_image
-from config.settings import UPLOAD_DIR,RESULT_DIR
-from network.restoration_model import RestorationModel
+from config.settings import UPLOAD_DIR, RESULT_DIR
+
 from network.colorization_model import ColorizationModel
+from network.colorization_model_unet import ColorizationUNetModel
 from network.models import uformer
-# from services.restoration_service import restoration_service
+
+# ============================================================
+# 공통 유틸
+# ============================================================
 
 def pad_to_divisible(x, div=16):
     _, _, h, w = x.size()
@@ -28,31 +31,63 @@ class ProcessingMode(str, Enum):
 
 router = APIRouter()
 
+# ============================================================
+# ✅ 전역 모델 캐싱 (로드 1회만 수행)
+# ============================================================
+print("[INFO] Initializing colorization models...")
+
+try:
+    UNET_MODEL = ColorizationUNetModel()
+    ECCV16_MODEL = ColorizationModel()
+    print("[INFO] ✅ Colorization models successfully loaded and cached.")
+except Exception as e:
+    print(f"[ERROR] ❌ Failed to initialize models: {e}")
+    UNET_MODEL, ECCV16_MODEL = None, None
+
+
+# ============================================================
+# 🎨 /colorize : 흑백 → 컬러 복원
+# ============================================================
 @router.post("/colorize")
 async def colorize(
     file: UploadFile = File(...),
+    model: str = Query("unet", enum=["unet", "eccv16"], description="사용할 모델 선택"),
     current_user: dict = Depends(get_current_user)
 ):
-
-    """흑백 이미지를 컬러로 변환"""
+    """흑백 이미지를 컬러로 변환 (UNet / ECCV16 선택 가능)"""
     validate_image(file)
     mode = ProcessingMode.COLORIZE
     user_id = current_user["user_id"]
+
     safe_filename = f"{user_id}_{file.filename}"
     input_path = os.path.join(UPLOAD_DIR, safe_filename)
     output_filename = f"{mode}d_{safe_filename}"
     output_path = os.path.join(RESULT_DIR, output_filename)
-    
-    # Save uploaded file
+
     try:
+        # 1️⃣ 업로드 파일 저장
         content = await file.read()
         with open(input_path, "wb") as f:
             f.write(content)
-        # todo - > RESIZE 및 모델로드 부분 분리
-        colorize_model = ColorizationModel()
-        pil_data = Image.open(input_path)
-        out_img = colorize_model._process_image(pil_data)
-        # output = output.resize(original_size, Image.BICUBIC)
+
+        # 2️⃣ PIL 로드
+        pil_data = Image.open(input_path).convert("RGB")
+
+        # 3️⃣ 캐싱된 모델 사용
+        if model.lower() == "unet":
+            if UNET_MODEL is None:
+                raise ModelNotLoadedException("UNet 모델이 로드되지 않았습니다.")
+            out_img = UNET_MODEL.colorize_with_unet(pil_data)
+
+        elif model.lower() == "eccv16":
+            if ECCV16_MODEL is None:
+                raise ModelNotLoadedException("ECCV16 모델이 로드되지 않았습니다.")
+            out_img = ECCV16_MODEL.colorize_with_eccv16(pil_data)
+
+        else:
+            raise HTTPException(status_code=400, detail=f"지원하지 않는 모델: {model}")
+
+        # 4️⃣ 결과 저장
         out_img.save(output_path)
 
         return FileResponse(
@@ -60,16 +95,16 @@ async def colorize(
             media_type="image/png",
             filename=f"colorized_{file.filename}"
         )
-    except ValueError as e:
+
+    except ValueError:
         raise ModelNotLoadedException()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Cleanup uploaded file
+        # Cleanup uploaded 파일
         if os.path.exists(input_path):
             os.remove(input_path)
             
-
 
 @router.post("/restore")
 async def restore(

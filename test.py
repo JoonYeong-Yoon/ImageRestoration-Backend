@@ -44,3 +44,56 @@ output_img = output_tensor.squeeze(0).cpu()
 output_img = to_pil(output_img.clamp(0, 1))
 output_path = r"e:\Advanced_Project\out2.png"
 output_img.save(output_path)
+
+# timm, einops
+from network.models import uformer_source
+
+"""
+python3 ./train/train_denoise.py --arch Uformer_B --batch_size 32 --gpu '0,1' \
+    --train_ps 128 --train_dir ../datasets/denoising/sidd/train --env _0706 \
+    --val_dir ../datasets/denoising/sidd/val --save_dir ./logs/ \
+    --dataset sidd --warmup 
+model_restoration = Uformer(
+    img_size=opt.train_ps,
+    embed_dim=32,
+    win_size=8,
+    token_projection='linear',
+    token_mlp='leff',
+    depths=[1, 2, 8, 8, 2, 8, 8, 2, 1],
+    modulator=True,dd_in=opt.dd_in)  
+"""
+
+model_restoration = uformer_source.Uformer(
+    img_size=128,embed_dim=32,
+    win_size=8,
+    token_projection='linear',
+    token_mlp='leff',
+    depths=[1, 2, 8, 8, 2, 8, 8, 2, 1],
+    modulator=True,
+    dd_in=3)  
+weight_file_path = "network/weights/damageRestoration/uformer_B.pth"
+import torch
+restoration_weights = torch.load(weight_file_path,map_location="cpu")
+model_restoration
+restoration_weights["state_dict"].keys()
+model_restoration.load_state_dict(restoration_weights)
+
+pretrained_dict = restoration_weights["state_dict"]
+model_restoration.load_state_dict(pretrained_dict)
+
+model_dict = model_restoration.state_dict()
+matched_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
+
+from collections import OrderedDict
+state_dict = restoration_weights["state_dict"]
+new_state_dict = OrderedDict()
+for k, v in state_dict.items():
+    name = k[7:] if 'module.' in k else k
+    new_state_dict[name] = v
+new_state_dict.keys()
+restoration_model.load_state_dict(new_state_dict)
+for name, param in restoration_model.named_parameters():
+    print(name, param.shape)
+
+
+restoration_model.load_state_dict(new_state_dict)

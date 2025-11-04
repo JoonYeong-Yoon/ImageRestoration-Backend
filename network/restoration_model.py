@@ -4,7 +4,7 @@ import torch.nn as nn
 from PIL import Image
 import logging
 import torchvision.transforms as transforms
-from .models.uformer import Uformer
+from .models.uformer import UNet
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
