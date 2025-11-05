@@ -13,7 +13,7 @@ from config.settings import UPLOAD_DIR, RESULT_DIR
 
 from network.colorization_model import ColorizationModel
 from network.colorization_model_unet import ColorizationUNetModel
-from network.models import uformer
+from network.restore_model_unet import RestoreUNetModel
 
 # ============================================================
 # 공통 유틸
@@ -136,14 +136,26 @@ RESTORE_MODEL_DISPATCH = {
 }
 
 # ============================================================
-# 🛠 /restore : 훼손 이미지 복원 (임시 구조)
+# ✅ 복원 모델 캐싱 (전역 1회 로드)
+# ============================================================
+print("[INFO] Initializing restoration models...")
+
+try:
+    RESTORE_UNET_MODEL = RestoreUNetModel()
+    print("[INFO] ✅ Restoration model successfully loaded.")
+except Exception as e:
+    print(f"[ERROR] ❌ Failed to initialize restore model: {e}")
+    RESTORE_UNET_MODEL = None
+
+# ============================================================
+# 🧠 /restore : 손상 이미지 복원
 # ============================================================
 @router.post("/restore")
 async def restore(
     file: UploadFile = File(...),
-    model: str = Form(..., enum=["uformer"], description="사용할 복원 모델 선택"),
+    model: str = Form(..., enum=["unet"], description="사용할 복원 모델 선택 (예: unet)"),
 ):
-    """훼손된 이미지를 복원"""
+    """손상 이미지를 복원"""
     validate_image(file)
     mode = ProcessingMode.RESTORE
     user_id = "temp"
@@ -154,44 +166,37 @@ async def restore(
     output_path = os.path.join(RESULT_DIR, output_filename)
 
     try:
-        # 1️⃣ 업로드 파일 저장
+        # 업로드 파일 저장
         content = await file.read()
         with open(input_path, "wb") as f:
             f.write(content)
 
-        # 2️⃣ PIL 로드
         pil_data = Image.open(input_path).convert("RGB")
 
-        # 3️⃣ 선택한 모델 호출
-        if model.lower() not in RESTORE_MODEL_DISPATCH:
+        if model.lower() != "unet":
             raise HTTPException(status_code=400, detail=f"지원하지 않는 복원 모델: {model}")
 
-        print(f"[DEBUG] 복원 모델 호출 시작: {model.lower()}, 입력 이미지 size: {pil_data.size}, mode: {pil_data.mode}")
+        if RESTORE_UNET_MODEL is None:
+            raise ModelNotLoadedException("UNet 복원 모델이 로드되지 않았습니다.")
 
-        # =========================
-        # 실제 모델 구현 후 교체 예정
-        # =========================
-        out_img = RESTORE_MODEL_DISPATCH[model.lower()](pil_data)
+        print(f"[DEBUG] 복원 시작: {model}, 입력: {pil_data.size}")
+        out_img = RESTORE_UNET_MODEL.restore_with_unet(pil_data)
+        print("[DEBUG] 복원 완료 ✅")
 
-        print(f"[DEBUG] 복원 모델 호출 완료: {model.lower()}, 출력 타입: {type(out_img)}, size: {out_img.size}")
-
-        # 4️⃣ 결과 저장
+        # 결과 저장
         out_img.save(output_path)
 
         return FileResponse(
             output_path,
-            media_type="image/png",
+            media_type="image/jpeg",
             filename=f"restored_{file.filename}"
         )
 
-    except ValueError:
-        raise ModelNotLoadedException()
     except Exception as e:
         import traceback
-        print(f"[ERROR] {model} 처리 중 예외 발생: {e}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"복원 실패: {e}")
+
     finally:
-        # Cleanup 업로드 파일
         if os.path.exists(input_path):
             os.remove(input_path)
