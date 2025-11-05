@@ -64,6 +64,9 @@ class ColorizationUNetModel:
         """UNet 모델로 컬러화"""
         try:
             logger.info(f"UNet 이미지 처리 중: {pil_data}")
+            
+            # 원본 크기 저장
+            original_size = pil_data.size  # (width, height)
 
             # 1️⃣ PIL → RGB → numpy → LAB
             img_rgb = pil_data.convert("RGB").resize((224, 224))
@@ -88,6 +91,9 @@ class ColorizationUNetModel:
             # 5️⃣ LAB → RGB
             rgb_out = np.clip(color.lab2rgb(lab_out), 0, 1)
             out_img = Image.fromarray((rgb_out * 255).astype(np.uint8))
+            
+            out_img = out_img.resize(original_size, Image.BICUBIC)
+            
             return out_img
         except Exception as e:
             error_msg = f"UNet 이미지 처리 중 오류 발생: {str(e)}"

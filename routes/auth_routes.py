@@ -28,7 +28,7 @@ async def login(user: UserLogin, response: Response):
         key="session_token",
         value=result["access_token"],
         httponly=True,
-        secure=True,
+        secure=False,
         samesite="lax",
         max_age=result["expires_in"],
         path="/"
@@ -36,10 +36,19 @@ async def login(user: UserLogin, response: Response):
     return response
 
 @router.post("/logout", response_model=ResponseModel)
-async def logout(request:Request):
-    # read session token from cookie or Authorization header
-    req: Request = request
-    token = req.cookies.get("session_token") or (req.headers.get("Authorization") or "").split(" ")[-1]
-    response = JSONResponse(content={"ok": True, "msg": "로그아웃 완료", "data": None})
-    response.delete_cookie(key="session_token")
+async def logout():
+    """
+    로그아웃: 브라우저 쿠키에서 session_token 삭제
+    """
+    response = JSONResponse(
+        content={"ok": True, "msg": "로그아웃 완료", "data": None}
+    )
+
+    response.delete_cookie(
+    key="session_token",
+    path="/",
+    httponly=True,
+    secure=False,
+    samesite="lax"
+    )
     return response

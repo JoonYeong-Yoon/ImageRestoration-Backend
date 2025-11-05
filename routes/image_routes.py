@@ -1,6 +1,6 @@
 import os, torch
 from enum import Enum
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query, Form
 from fastapi.responses import FileResponse
 from PIL import Image
 from torchvision import transforms
@@ -55,8 +55,9 @@ MODEL_DISPATCH = {
 @router.post("/colorize")
 async def colorize(
     file: UploadFile = File(...),
-    model: str = Query("eccv16", enum=["unet", "eccv16"], description="사용할 모델 선택"),
+    model: str = Form(..., enum=["unet", "eccv16", "UNET", "ECCV16"], description="사용할 모델 선택"),
 ):
+    print("model",model)
     """흑백 이미지를 컬러로 변환 (UNet / ECCV16 선택 가능)"""
     validate_image(file)
     mode = ProcessingMode.COLORIZE
@@ -86,8 +87,10 @@ async def colorize(
         # 모델별 독립 _process_image 호출
         # =========================
         if model.lower() == "unet":
+            print("unet")
             out_img = UNET_MODEL._process_image(pil_data)  # UNet 전용 처리
         elif model.lower() == "eccv16":
+            print("eccv16")
             out_img = ECCV16_MODEL._process_image(pil_data)  # ECCV16 전용 처리
 
         print(f"[DEBUG] 모델 호출 완료: {model.lower()}, 출력 타입: {type(out_img)}, size: {out_img.size}")
@@ -114,63 +117,66 @@ async def colorize(
             os.remove(input_path)
             
 
+# ============================================================
+# 전역 복원 모델 캐싱 (임시)
+# ============================================================
+print("[INFO] Initializing restoration models...")
+
+try:
+    # 아직 모델 구현 중이므로 임시 객체 생성
+    UFORMER_MODEL = None  # 나중에 실제 Uformer 모델 로드 예정
+    print("[INFO] ✅ Restoration model placeholder initialized.")
+except Exception as e:
+    print(f"[ERROR] ❌ Failed to initialize restoration model: {e}")
+    UFORMER_MODEL = None
+
+RESTORE_MODEL_DISPATCH = {
+    "uformer": lambda img: (_ for _ in ()).throw(ModelNotLoadedException("Uformer 모델이 로드되지 않았습니다.")),
+    # 나중에 다른 모델 추가 가능
+}
+
+# ============================================================
+# 🛠 /restore : 훼손 이미지 복원 (임시 구조)
+# ============================================================
 @router.post("/restore")
 async def restore(
     file: UploadFile = File(...),
-    # current_user: dict = Depends(get_current_user)
+    model: str = Form(..., enum=["uformer"], description="사용할 복원 모델 선택"),
 ):
-    """훼손된 이미지 복원"""
-    """흑백 이미지를 컬러로 변환"""
+    """훼손된 이미지를 복원"""
     validate_image(file)
-    mode = ProcessingMode.COLORIZE
-    # user_id = current_user["user_id"]
+    mode = ProcessingMode.RESTORE
     user_id = "temp"
+
     safe_filename = f"{user_id}_{file.filename}"
     input_path = os.path.join(UPLOAD_DIR, safe_filename)
     output_filename = f"{mode}d_{safe_filename}"
     output_path = os.path.join(RESULT_DIR, output_filename)
-    # Save uploaded file
+
     try:
+        # 1️⃣ 업로드 파일 저장
         content = await file.read()
         with open(input_path, "wb") as f:
             f.write(content)
-        restoration_model = uformer.UNet(dim = 32)
-        weight_file_path = "network/weights/damageRestoration/Uformer_B.pth"
-        
-        checkpoint = torch.load(weight_file_path, map_location="cpu")
 
-        # checkpoint가 dict 구조인지 확인
-        if "state_dict" in checkpoint:
-            checkpoint = checkpoint["state_dict"]
+        # 2️⃣ PIL 로드
+        pil_data = Image.open(input_path).convert("RGB")
 
-        model_dict = restoration_model.state_dict()
-        # 맞는 키만 업데이트
-        pretrained_dict = {k: v for k, v in checkpoint.items() if k in model_dict and v.size() == model_dict[k].size()}
-        model_dict.update(pretrained_dict)
-        restoration_model.load_state_dict(model_dict)
-        restoration_model.eval()
+        # 3️⃣ 선택한 모델 호출
+        if model.lower() not in RESTORE_MODEL_DISPATCH:
+            raise HTTPException(status_code=400, detail=f"지원하지 않는 복원 모델: {model}")
 
-        restoration_weights = torch.load(weight_file_path,map_location="cpu")
-        restoration_model.load_state_dict(restoration_weights)
-        restoration_model.eval()
-        # todo - > RESIZE 및 모델로드 부분 분리
-        transform = transforms.ToTensor()
-        to_pil = transforms.ToPILImage()
-        img = Image.open(input_path).convert("RGB")
-        orig_w, orig_h = img.size
+        print(f"[DEBUG] 복원 모델 호출 시작: {model.lower()}, 입력 이미지 size: {pil_data.size}, mode: {pil_data.mode}")
 
-        img_tensor = transform(img).unsqueeze(0)
-        padded_tensor, orig_h, orig_w = pad_to_divisible(img_tensor, div=16)
-        with torch.no_grad():
-            output_tensor = restoration_model(padded_tensor)
+        # =========================
+        # 실제 모델 구현 후 교체 예정
+        # =========================
+        out_img = RESTORE_MODEL_DISPATCH[model.lower()](pil_data)
 
-        # crop 원래 크기로
-        output_tensor = output_tensor[:, :, :orig_h, :orig_w]
+        print(f"[DEBUG] 복원 모델 호출 완료: {model.lower()}, 출력 타입: {type(out_img)}, size: {out_img.size}")
 
-        # ====== 후처리 및 저장 ======
-        output_img = output_tensor.squeeze(0).cpu()
-        output_img = to_pil(output_img.clamp(0, 1))
-        output_img.save(output_path)
+        # 4️⃣ 결과 저장
+        out_img.save(output_path)
 
         return FileResponse(
             output_path,
@@ -178,13 +184,14 @@ async def restore(
             filename=f"restored_{file.filename}"
         )
 
-    except ValueError as e:
+    except ValueError:
         raise ModelNotLoadedException()
     except Exception as e:
-        print(e)
+        import traceback
+        print(f"[ERROR] {model} 처리 중 예외 발생: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Cleanup uploaded file
+        # Cleanup 업로드 파일
         if os.path.exists(input_path):
             os.remove(input_path)
-            
