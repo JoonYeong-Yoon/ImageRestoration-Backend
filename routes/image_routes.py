@@ -34,19 +34,21 @@ router = APIRouter()
 # ============================================================
 # ✅ 전역 모델 캐싱 (로드 1회만 수행)
 # ============================================================
-print("[INFO] Initializing colorization models...")
+print("[INFO] Initializing models...")
 
 try:
     UNET_MODEL = ColorizationUNetModel()
     ECCV16_MODEL = ColorizationModel()
-    print("[INFO] ✅ Colorization models successfully loaded and cached.")
+    RESTORE_UNET_MODEL = RestoreUNetModel()
+    print("[INFO] ✅ All models successfully loaded and cached.")
 except Exception as e:
-    print(f"[ERROR] ❌ Failed to initialize models: {e}")
-    UNET_MODEL, ECCV16_MODEL = None, None
+    print(f"[ERROR] ❌ Model initialization failed: {e}")
+    UNET_MODEL, ECCV16_MODEL, RESTORE_UNET_MODEL = None, None, None
 
 MODEL_DISPATCH = {
     "unet": lambda img: UNET_MODEL.colorize_with_unet(img) if UNET_MODEL else (_ for _ in ()).throw(ModelNotLoadedException("UNet 모델이 로드되지 않았습니다.")),
     "eccv16": lambda img: ECCV16_MODEL.colorize_with_eccv16(img) if ECCV16_MODEL else (_ for _ in ()).throw(ModelNotLoadedException("ECCV16 모델이 로드되지 않았습니다.")),
+    "restore": lambda img: RESTORE_UNET_MODEL.restore_with_unet(img) if RESTORE_UNET_MODEL else (_ for _ in ()).throw(ModelNotLoadedException("RESTORE 모델이 로드되지 않았습니다."))
 }
 
 # ============================================================
@@ -118,55 +120,21 @@ async def colorize(
             
 
 # ============================================================
-# 전역 복원 모델 캐싱 (임시)
-# ============================================================
-print("[INFO] Initializing restoration models...")
-
-try:
-    # 아직 모델 구현 중이므로 임시 객체 생성
-    UFORMER_MODEL = None  # 나중에 실제 Uformer 모델 로드 예정
-    print("[INFO] ✅ Restoration model placeholder initialized.")
-except Exception as e:
-    print(f"[ERROR] ❌ Failed to initialize restoration model: {e}")
-    UFORMER_MODEL = None
-
-RESTORE_MODEL_DISPATCH = {
-    "uformer": lambda img: (_ for _ in ()).throw(ModelNotLoadedException("Uformer 모델이 로드되지 않았습니다.")),
-    # 나중에 다른 모델 추가 가능
-}
-
-# ============================================================
-# ✅ 복원 모델 캐싱 (전역 1회 로드)
-# ============================================================
-print("[INFO] Initializing restoration models...")
-
-try:
-    RESTORE_UNET_MODEL = RestoreUNetModel()
-    print("[INFO] ✅ Restoration model successfully loaded.")
-except Exception as e:
-    print(f"[ERROR] ❌ Failed to initialize restore model: {e}")
-    RESTORE_UNET_MODEL = None
-
-# ============================================================
 # 🧠 /restore : 손상 이미지 복원
 # ============================================================
 @router.post("/restore")
 async def restore(
     file: UploadFile = File(...),
-    model: str = Form(..., enum=["unet"], description="사용할 복원 모델 선택 (예: unet)"),
+    model: str = Form(..., enum=["unet"], description="복원 모델 선택")
 ):
-    """손상 이미지를 복원"""
     validate_image(file)
     mode = ProcessingMode.RESTORE
     user_id = "temp"
 
-    safe_filename = f"{user_id}_{file.filename}"
-    input_path = os.path.join(UPLOAD_DIR, safe_filename)
-    output_filename = f"{mode}d_{safe_filename}"
-    output_path = os.path.join(RESULT_DIR, output_filename)
+    input_path = os.path.join(UPLOAD_DIR, f"{user_id}_{file.filename}")
+    output_path = os.path.join(RESULT_DIR, f"{mode}d_{user_id}_{file.filename}")
 
     try:
-        # 업로드 파일 저장
         content = await file.read()
         with open(input_path, "wb") as f:
             f.write(content)
@@ -176,21 +144,15 @@ async def restore(
         if model.lower() != "unet":
             raise HTTPException(status_code=400, detail=f"지원하지 않는 복원 모델: {model}")
 
-        if RESTORE_UNET_MODEL is None:
+        if not RESTORE_UNET_MODEL:
             raise ModelNotLoadedException("UNet 복원 모델이 로드되지 않았습니다.")
 
-        print(f"[DEBUG] 복원 시작: {model}, 입력: {pil_data.size}")
+        print(f"[DEBUG] 복원 시작 - 모델: {model}, 입력 크기: {pil_data.size}")
         out_img = RESTORE_UNET_MODEL.restore_with_unet(pil_data)
-        print("[DEBUG] 복원 완료 ✅")
-
-        # 결과 저장
         out_img.save(output_path)
 
-        return FileResponse(
-            output_path,
-            media_type="image/jpeg",
-            filename=f"restored_{file.filename}"
-        )
+        print("[DEBUG] 복원 완료 ✅")
+        return FileResponse(output_path, media_type="image/jpeg", filename=f"restored_{file.filename}")
 
     except Exception as e:
         import traceback
